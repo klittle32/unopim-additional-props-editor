@@ -1,0 +1,9 @@
+/.letta/
+/.workbench/
+/vendor/
+/node_modules/
+/.phpunit.cache/
+/test-results/
+/playwright-report/
+/.env
+/.DS_Store

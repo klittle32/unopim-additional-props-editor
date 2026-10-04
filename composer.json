@@ -1,0 +1,41 @@
+{
+    "name": "klittle32/unopim-additional-props-editor",
+    "description": "A focused admin editor for UnoPIM additional specifications and feature bullets.",
+    "type": "library",
+    "license": "MIT",
+    "require": {
+        "php": "^8.4.1",
+        "illuminate/database": "^13.0",
+        "illuminate/http": "^13.0",
+        "illuminate/routing": "^13.0",
+        "illuminate/support": "^13.0",
+        "illuminate/view": "^13.0"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^13.2"
+    },
+    "autoload": {
+        "psr-4": {
+            "UnopimAdditionalPropsEditor\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "UnopimAdditionalPropsEditor\\Tests\\": "tests/"
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "UnopimAdditionalPropsEditor\\AdditionalPropsServiceProvider"
+            ]
+        }
+    },
+    "scripts": {
+        "test": "@php vendor/bin/phpunit",
+        "test:integration": "@php .workbench/unopim/vendor/bin/phpunit -c phpunit.integration.xml"
+    },
+    "config": {
+        "sort-packages": true
+    }
+}

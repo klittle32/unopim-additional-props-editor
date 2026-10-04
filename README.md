@@ -1,149 +1,90 @@
 # UnoPIM Additional Props Editor
 
-A proposed open-source extension that makes flexible product data in UnoPIM's
-`additional` JSON field visible and editable in the admin.
+An independent Laravel package adding an **Additional Product Data** panel to UnoPIM's native product editor. It manages flexible specifications and ordered feature bullets without replacing native attributes or requiring raw JSON editing.
 
-**Status: requirements and design only. No installable extension is available
-yet.** This repository describes the intended behavior; it does not claim that
-the features below have been implemented or tested.
+Implemented and tested against UnoPIM **v3.1.3** (`6a35666490ff0deb37bc317fd33045e557a573a4`), PHP **8.4.24**, and MySQL **8.0**. This is source-distributed development software, not a published Packagist release. See [verification evidence and limitations](docs/VERIFICATION.md).
 
-## The need
+## Install from source
 
-UnoPIM's native product editor is driven by predefined attributes and attribute
-families. Products also expose an `additional` JSON field through the REST API,
-but the standard product editor in the reviewed v3.1.3 source does not provide a
-viewer or editor for that field.
+Back up your PIM and test in staging first. In your UnoPIM application, configure a Composer path repository pointing at a checkout of this package:
 
-That leaves a gap for product information that does not fit a predefined schema:
+```sh
+composer config repositories.additional-props path /absolute/path/to/unopim-additional-props-editor
+composer require 'klittle32/unopim-additional-props-editor:@dev'
+php artisan vendor:publish --tag=additional-props-assets
+php artisan optimize:clear
+```
 
-- Open-ended specifications expressed as name–value pairs.
-- Feature bullets expressed as an ordered array of strings.
-- Extra facts that complement, rather than replace, a product's native attributes.
+Alternatively configure a Composer `vcs` repository using this repository's Git URL and require the appropriate development branch/version. No registry publication is assumed. Laravel package discovery registers `UnopimAdditionalPropsEditor\AdditionalPropsServiceProvider`; if your application's `dont-discover` configuration disables it, register that provider explicitly. No core template edits, database migrations, Node build, or extra service are required.
 
-Data can be retained programmatically without being accessible to the person
-reviewing the product. This extension aims to close that gap with ordinary form
-controls, not a requirement for users to edit raw JSON.
+The declared dependencies target PHP `^8.4.1` and Illuminate `^13.0`. The pinned upstream lock cannot run on the tested host's PHP 8.5: use a compatible runtime, not `--ignore-platform-reqs`. Other UnoPIM, database, or PHP combinations are unverified.
 
-## Initial scope
+**Packaging boundary:** Composer manifest/lock validation passes; the native fixture registers source directly. A clean consumer Composer installation has not yet been verified.
 
-Add an **Additional Product Data** panel to the existing product-editing page.
+## Use
 
-| Section | Human interface | Product storage |
-| --- | --- | --- |
-| Additional specifications | Add, edit, and remove name–value rows | `additional.attributes` |
-| Features | Add, edit, remove, and reorder feature bullets | `additional.features` |
+Open an existing product as an admin with native `catalog.products.edit` permission. The panel appears below the native editor:
 
-The same panel should work for products whose specifications are entirely in
-`additional` and for products that use native attributes with only their excess
-specifications in `additional`. Native fields remain in their existing editor
-sections. No organization-, vendor-, category-, or product-specific rules belong
-in the extension.
+- Add/edit/remove specification name–value pairs.
+- Add/edit/remove feature bullets and move them up or down.
+- Use **Save additional data** to save this panel independently of native fields.
+- Unsaved additional edits trigger a browser departure warning. Conflicts retain your draft; copy anything needed, then explicitly choose **Reload and discard edits**.
 
-## Proposed data contract
+Native product saving is separate and does not save this panel. Additional-only and hybrid products use the same controls. Opening the panel does not write data. No-op saves do not create history.
 
-The following is a product payload fragment, not a new API endpoint:
+## Storage contract
 
 ```json
 {
   "additional": {
-    "attributes": {
-      "Material": "Steel",
-      "Overall length": "200 mm"
-    },
-    "features": [
-      "Comfortable grip",
-      "Corrosion-resistant finish"
-    ],
-    "metadata": {
-      "source_reference": "example-123"
-    }
+    "attributes": { "Material": "Steel", "Overall length": "200 mm" },
+    "features": ["Comfortable grip", "Corrosion-resistant finish"],
+    "metadata": { "source_reference": "example-123" }
   }
 }
 ```
 
-The initial editor manages only `attributes` and `features`. `metadata` above
-illustrates unrelated data that must be preserved; it is not a required field.
+Only `additional.attributes` and `additional.features` are managed; unrelated keys are not re-encoded. Specifications are a JSON object of strings and features an ordered string array. Names are unique and nonblank (at most 255 UTF-8 bytes, no NUL); values/features are at most 64 KiB each; each section allows at most 1,000 rows; the request limit is 1 MiB. Numeric-looking names and string whitespace are retained. Object key ordering is not meaningful; feature ordering is.
 
-- Specifications initially use string names and string values, preserving
-  unit-bearing wording without guessing conversions or semantic types.
-- Feature values remain an ordered JSON array of strings, not HTML, a serialized
-  string, or predefined multiselect options.
-- Missing managed sections should be usable as empty forms.
-- Existing unsupported shapes or non-string values must not be silently
-  converted, discarded, or replaced. Present a clear limitation and preserve them.
-- Specification names must be unique within the managed object. Reject
-  duplicates rather than silently losing a row during serialization.
-- Opening a product must not mutate its data.
+Missing sections and SQL/JSON null roots are empty forms. Incompatible roots or section shapes, including numeric values, are preserved and read-only. An unsupported section does not prevent editing a supported sibling. LF newlines are editable using multiline controls; sections containing CR or CRLF are read-only in the browser to avoid silent newline normalization. Content is rendered as text, never HTML.
 
-The native `values` payload remains separate. Editing additional data must not
-change the product's native attributes, family, categories, or publication status.
+## Persistence and history
 
-## Integration and safety requirements
+Routes use native admin sessions, product edit permission, and CSRF protection. Saves lock the product row, compare a SHA-256 token covering the complete stored `additional` value, and update only changed managed paths with MySQL `JSON_SET`. Other additional keys and native product fields remain unchanged; a real save updates `updated_at`.
 
-- Implement a self-contained UnoPIM/Laravel package using documented extension
-  mechanisms. Prefer existing product-editor view-render events over replacing
-  core templates or maintaining a UnoPIM fork.
-- Use the existing admin session and product permissions. Enforce authorization
-  and CSRF protection on writes, not merely by hiding buttons.
-- Validate incoming data and render user-supplied content safely as text.
-- Save only the managed sections, preserving unrelated `additional` keys.
-- Detect conflicting edits rather than silently overwriting newer data from
-  another user or integration. A blind replacement of a stale complete
-  `additional` object is not acceptable.
-- Integrate changes with UnoPIM's history mechanisms where supported, verifying
-  attribution and the visibility of changes rather than assuming JSON edits are
-  automatically covered.
-- Keep the stored representation readable by existing API clients. The UI must
-  not introduce a second, competing copy of the product's additional data.
+The package deliberately bypasses the native product-saving observer (which can normalize native measurements). It instead records attributed native `AuditCustom` history, with JSON snapshots under **Additional specifications** and **Additional features**. History and data changes share a transaction. Disabled, queued, missing, or separate-connection audit storage causes saving to fail and roll back rather than silently omit history. History is section-level JSON, not a per-row visual diff. Standard API clients still read the same `additional` object.
 
-UI injection and persistence are separate responsibilities: adding a Blade view
-alone does not make its inputs part of UnoPIM's native save behavior.
+## Upgrade and removal
+
+After updating source/dependencies, republish assets and clear application caches:
+
+```sh
+php artisan vendor:publish --tag=additional-props-assets --force
+php artisan optimize:clear
+```
+
+Republishing replaces package assets, including any local modifications to those assets. No stored product data migration is performed. To remove, remove the Composer dependency (and any explicit provider registration), clear caches, and optionally delete only `public/vendor/additional-props-editor`. Existing `additional` data and recorded history remain in your database and accessible to existing API clients. Back up before upgrades or removal.
+
+## Development and tests
+
+```sh
+composer install
+composer test
+node --test tests/js/editor.test.mjs
+composer validate --strict
+```
+
+[Disposable native fixture instructions](scripts/README.md) cover the pinned upstream checkout, MySQL, real routing/auth/CSRF/history tests, and browser server. Never run fixture setup against a live PIM. The fixture uses synthetic generic products and a disposable account. Test artifacts and dependencies belong under ignored `.workbench/`.
 
 ## Boundaries
 
-This is an editor for additional product data, not an enrichment engine or a
-general-purpose schema builder. The initial scope does not include AI generation,
-connectors, automatic attribute creation, or automatic promotion of additional
-properties into native attributes.
+This is not an enrichment engine or schema builder. There is no AI generation, connector, automatic attribute creation, or promotion into native attributes. Additional JSON does not acquire native filtering, completeness rules, channel/locale scoping, or variant inheritance; use native attributes when those capabilities are needed. Concurrent writes that bypass locking/version checks outside this package remain the responsibility of those integrations.
 
-Human-editable JSON does **not** automatically gain native attribute filtering,
-completeness rules, channel/locale scoping, or variant inheritance. Continue to
-use native attributes when those capabilities are required. Any extension of
-those semantics needs its own explicit design and verification.
+## References and license
 
-## Compatibility and development
-
-The initial research target is **UnoPIM 3.1.3**. This is a development target,
-not a claim of extension compatibility. Supported versions, installation steps,
-asset deployment, upgrades, and removal behavior will be documented once there
-is an implementation and corresponding test evidence.
-
-Development should begin with tests for the data contract and authorized save
-behavior, followed by a small, working admin panel. Acceptance requires both
-server-side verification and actual browser testing:
-
-1. Existing specifications and feature strings appear on the product page.
-2. Add/edit/remove operations persist after saving and reloading; feature order
-   survives a fresh API read.
-3. Both additional-only and hybrid products work without changing native fields.
-4. Unrelated JSON, unsupported existing values, and unchanged data are preserved.
-5. Invalid input, insufficient permissions, and conflicting edits fail clearly
-   without data loss.
-6. Empty and incompatible payloads have understandable behavior.
-7. History behavior is verified and any limitations are documented.
-
-Tests and examples should use synthetic, generic product data.
-
-## Upstream references
-
-- [Product REST API](https://devdocs.unopim.com/3.1/api/product.html)
+- [UnoPIM product REST API](https://devdocs.unopim.com/3.1/api/product.html)
 - [Package development](https://devdocs.unopim.com/3.1/packages/)
 - [View-render events](https://devdocs.unopim.com/3.1/advanced/render-event.html)
 - [Access control](https://devdocs.unopim.com/3.1/packages/create-acl.html)
-- [Package testing](https://devdocs.unopim.com/3.1/packages/testing.html)
 
-This is an independent community project, not an official UnoPIM extension.
-
-## License
-
-[MIT](LICENSE).
+Independent community project, not an official UnoPIM extension. [MIT](LICENSE).
