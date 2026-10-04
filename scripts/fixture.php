@@ -7,7 +7,12 @@ if (($argv[1] ?? '') === 'configure') {
     if (file_exists($upstream.'/.env')) {
         throw new RuntimeException('Fixture .env already exists; inspect it instead of overwriting.');
     }
-    file_put_contents($upstream.'/.env', <<<'ENV'
+    $driver = $argv[2] ?? 'mysql';
+    $ports = ['mysql' => '13316', 'pgsql' => '15436'];
+    if (! isset($ports[$driver])) {
+        throw new RuntimeException('Fixture driver must be mysql or pgsql.');
+    }
+    $environment = <<<'ENV'
 APP_NAME="Additional Props Fixture"
 APP_ENV=local
 APP_KEY=base64:YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXoxMjM0NTY=
@@ -27,8 +32,12 @@ CACHE_STORE=file
 QUEUE_CONNECTION=sync
 MAIL_MAILER=log
 ELASTICSEARCH_ENABLED=false
-ENV
-    );
+ENV;
+    file_put_contents($upstream.'/.env', str_replace(
+        ['DB_CONNECTION=mysql', 'DB_PORT=13316'],
+        ['DB_CONNECTION='.$driver, 'DB_PORT='.$ports[$driver]],
+        $environment,
+    ));
     exit;
 }
 require $root.'/tests/integration-bootstrap.php';

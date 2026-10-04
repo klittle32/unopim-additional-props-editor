@@ -11,12 +11,16 @@ function additionalPropsFixtureApp(): Illuminate\Foundation\Application
 {
     $app = require dirname(__DIR__).'/.workbench/unopim/bootstrap/app.php';
     $app->make(Illuminate\Contracts\Console\Kernel::class)->bootstrap();
-    if (config('database.default') !== 'mysql'
-        || ! in_array(config('database.connections.mysql.host'), ['127.0.0.1', 'host.docker.internal'], true)
-        || config('database.connections.mysql.username') !== 'fixture'
-        || config('database.connections.mysql.password') !== 'fixture-only'
-        || (string) config('database.connections.mysql.port') !== '13316'
-        || config('database.connections.mysql.database') !== 'additional_props_fixture') {
+    $driver = config('database.default');
+    $database = config("database.connections.{$driver}", []);
+    $ports = ['mysql' => '13316', 'pgsql' => '15436'];
+    if (! isset($ports[$driver])
+        || ! empty($database['url'])
+        || ! in_array($database['host'] ?? null, ['127.0.0.1', 'host.docker.internal'], true)
+        || ($database['username'] ?? null) !== 'fixture'
+        || ($database['password'] ?? null) !== 'fixture-only'
+        || (string) ($database['port'] ?? '') !== ($ports[$driver] ?? null)
+        || ($database['database'] ?? null) !== 'additional_props_fixture') {
         throw new RuntimeException('Refusing to use anything except the disposable loopback fixture database.');
     }
     if (class_exists(UnopimAdditionalPropsEditor\AdditionalPropsServiceProvider::class)) {

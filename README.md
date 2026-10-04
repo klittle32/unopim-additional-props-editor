@@ -2,7 +2,7 @@
 
 An independent Laravel package adding an **Additional Product Data** panel to UnoPIM's native product editor. It manages flexible specifications and ordered feature bullets without replacing native attributes or requiring raw JSON editing.
 
-Implemented and tested against UnoPIM **v3.1.3** (`6a35666490ff0deb37bc317fd33045e557a573a4`), PHP **8.4.24**, and MySQL **8.0**. This is source-distributed development software, not a published Packagist release. See [verification evidence and limitations](docs/VERIFICATION.md).
+Implemented and tested against UnoPIM **v3.1.3** (`6a35666490ff0deb37bc317fd33045e557a573a4`), PHP **8.4.24**, MySQL **8.0**, and PostgreSQL **16**. This is source-distributed development software, not a published Packagist release. See [verification evidence and limitations](docs/VERIFICATION.md).
 
 ## Install from source
 
@@ -19,7 +19,7 @@ Alternatively configure a Composer `vcs` repository using this repository's Git 
 
 The declared dependencies target PHP `^8.4.1` and Illuminate `^13.0`. The pinned upstream lock cannot run on the tested host's PHP 8.5: use a compatible runtime, not `--ignore-platform-reqs`. Other UnoPIM, database, or PHP combinations are unverified.
 
-**Packaging boundary:** Composer manifest/lock validation passes; the native fixture registers source directly. A clean consumer Composer installation has not yet been verified.
+**Packaging boundary:** A separate native consumer successfully installed the package through a Composer path repository, discovered its provider and routes, and published its assets. Existing pinned upstream dependencies were reused; an empty-vendor download and VCS/registry installation were not tested.
 
 ## Use
 
@@ -50,7 +50,7 @@ Missing sections and SQL/JSON null roots are empty forms. Incompatible roots or 
 
 ## Persistence and history
 
-Routes use native admin sessions, product edit permission, and CSRF protection. Saves lock the product row, compare a SHA-256 token covering the complete stored `additional` value, and update only changed managed paths with MySQL `JSON_SET`. Other additional keys and native product fields remain unchanged; a real save updates `updated_at`.
+Routes use native admin sessions, product edit permission, and CSRF protection. Saves lock the product row, compare a SHA-256 token covering the complete stored `additional` value, and update only changed managed paths using Laravel's query builder and database grammar (no package driver branches). MySQL and PostgreSQL execute the JSON path updates in the database; the complete document is never decoded and rewritten by PHP. Other additional keys and native product fields remain unchanged; a real save updates `updated_at`.
 
 The package deliberately bypasses the native product-saving observer (which can normalize native measurements). It instead records attributed native `AuditCustom` history, with JSON snapshots under **Additional specifications** and **Additional features**. History and data changes share a transaction. Disabled, queued, missing, or separate-connection audit storage causes saving to fail and roll back rather than silently omit history. History is section-level JSON, not a per-row visual diff. Standard API clients still read the same `additional` object.
 
@@ -74,7 +74,7 @@ node --test tests/js/editor.test.mjs
 composer validate --strict
 ```
 
-[Disposable native fixture instructions](scripts/README.md) cover the pinned upstream checkout, MySQL, real routing/auth/CSRF/history tests, and browser server. Never run fixture setup against a live PIM. The fixture uses synthetic generic products and a disposable account. Test artifacts and dependencies belong under ignored `.workbench/`.
+[Disposable native fixture instructions](scripts/README.md) cover the pinned upstream checkout, MySQL/PostgreSQL, real routing/auth/CSRF/history tests, and browser server. Never run fixture setup against a live PIM. The fixture uses synthetic generic products and a disposable account. Test artifacts and dependencies belong under ignored `.workbench/`.
 
 ## Boundaries
 

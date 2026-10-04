@@ -96,7 +96,7 @@ final class AdditionalDataTest extends TestCase
     public function test_out_of_band_change_conflicts_and_retains_new_data(): void
     {
         $version = $this->version();
-        DB::table('products')->where('id', $this->product->id)->update(['additional' => DB::raw("JSON_SET(additional, '$.external', 'changed by API')")]);
+        DB::table('products')->where('id', $this->product->id)->update(['additional->external' => 'changed by API']);
         $before = $this->row();
         $this->patchChanges(['features' => ['Old tab']], $version)->assertStatus(409);
         self::assertSame($before, $this->row());
@@ -142,10 +142,32 @@ final class AdditionalDataTest extends TestCase
 
     public function test_null_and_missing_sections_can_be_added(): void
     {
-        foreach ([null, '{}'] as $additional) {
+        foreach ([null, 'null', '{}'] as $additional) {
             DB::table('products')->where('id', $this->product->id)->update(['additional' => $additional]);
-            $this->patchChanges(['attributes' => [['name' => 'Added', 'value' => '']], 'features' => []])->assertOk();
+            $this->patchChanges(['attributes' => [['name' => 'Added', 'value' => '']], 'features' => ['New']])->assertOk();
+            $data = json_decode($this->row()['additional']);
+            self::assertSame('', $data->attributes->Added);
+            self::assertSame(['New'], $data->features);
         }
+    }
+
+    public function test_both_sections_keep_numeric_names_object_shape_and_feature_order(): void
+    {
+        $this->patchChanges([
+            'attributes' => [['name' => '0', 'value' => 'zero'], ['name' => '1', 'value' => 'one'], ['name' => '01', 'value' => 'leading']],
+            'features' => ['Second', ' First ', 'Second'],
+        ])->assertOk();
+        $data = json_decode($this->row()['additional']);
+        self::assertInstanceOf(stdClass::class, $data->attributes);
+        self::assertSame('zero', $data->attributes->{'0'});
+        self::assertSame('one', $data->attributes->{'1'});
+        self::assertSame('leading', $data->attributes->{'01'});
+        self::assertSame(['Second', ' First ', 'Second'], $data->features);
+        $this->patchChanges(['attributes' => [], 'features' => []])->assertOk();
+        $data = json_decode($this->row()['additional']);
+        self::assertInstanceOf(stdClass::class, $data->attributes);
+        self::assertSame([], get_object_vars($data->attributes));
+        self::assertSame([], $data->features);
     }
 
     public function test_revoked_permission_and_disabled_account_cannot_write(): void
@@ -170,8 +192,36 @@ final class AdditionalDataTest extends TestCase
         Event::listen(OwenIt\Auditing\Events\AuditCustom::class, function (): void {
             throw new RuntimeException('Synthetic audit failure');
         });
-        $this->patchChanges(['features' => ['Must roll back']])->assertStatus(500);
+        $auditCount = DB::table('audits')->count();
+        $this->patchChanges([
+            'attributes' => [['name' => 'Must', 'value' => 'roll back']],
+            'features' => ['Must roll back'],
+        ])->assertStatus(500);
         self::assertSame($before, $this->row());
+        self::assertSame($auditCount, DB::table('audits')->count());
+    }
+
+    public function test_disabled_or_queued_history_refuses_writes(): void
+    {
+        $before = $this->row();
+        foreach ([['audit.enabled' => false], ['audit.enabled' => true, 'audit.queue.enable' => true]] as $settings) {
+            config($settings);
+            $this->patchChanges(['features' => ['Not saved']])->assertStatus(503);
+            self::assertSame($before, $this->row());
+        }
+    }
+
+    public function test_vetoed_history_rolls_back_both_sections(): void
+    {
+        $before = $this->row();
+        $count = DB::table('audits')->count();
+        Event::listen(OwenIt\Auditing\Events\Auditing::class, fn () => false);
+        $this->patchChanges([
+            'attributes' => [['name' => 'Not', 'value' => 'saved']],
+            'features' => ['Not saved'],
+        ])->assertStatus(503);
+        self::assertSame($before, $this->row());
+        self::assertSame($count, DB::table('audits')->count());
     }
 
     public function test_history_is_attributed_and_visible_in_native_controller(): void

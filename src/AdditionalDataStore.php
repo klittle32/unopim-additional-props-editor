@@ -58,9 +58,6 @@ final class AdditionalDataStore
 
     private function requireTransactionalHistory(Product $product): void
     {
-        abort_unless($product->getConnection()->getDriverName() === 'mysql', 503,
-            'This editor currently requires MySQL JSON support.');
-
         abort_unless(config('audit.enabled', true)
             && $product->getAuditDriver() === 'database'
             && ! config('audit.queue.enable', false)
@@ -72,32 +69,34 @@ final class AdditionalDataStore
     {
         $connection = $product->getConnection();
         $grammar = $connection->getQueryGrammar();
-        $table = $grammar->wrapTable($product->getTable());
-        $column = $grammar->wrap('additional');
-        $key = $grammar->wrap($product->getKeyName());
-        $updatedAt = $grammar->wrap($product->getUpdatedAtColumn());
-        $paths = [];
-        $bindings = [];
+        // A base query avoids Product saving observers that normalize native values.
+        $query = $connection->table($product->getTable())
+            ->where($product->getKeyName(), $product->getKey());
+        $raw = $product->getRawOriginal('additional');
 
-        foreach ($changes as $section => $value) {
-            // Section names are an allowlisted contract, never user-supplied SQL.
-            $paths[] = '?, CAST(? AS JSON)';
-            $bindings[] = '$.'.$section;
-            $bindings[] = AdditionalData::encode($value);
+        // Only initialize a valid empty root, after validation and under the row lock.
+        if ($raw === null || trim($raw) === 'null') {
+            $query->update(['additional' => '{}']);
         }
 
-        $bindings[] = $product->freshTimestampString();
-        $bindings[] = $product->getKey();
+        foreach ($changes as $section => $value) {
+            // The validated section is allowlisted. Let Laravel compile the JSON
+            // selector and value cast; bind encoded JSON without casting objects to
+            // arrays (which would lose {} and numeric-looking specification keys).
+            $values = [
+                'additional->'.$section => $connection->raw($grammar->compileJsonValueCast('?')),
+                $product->getUpdatedAtColumn() => $product->freshTimestampString(),
+            ];
 
-        // JSON_SET preserves unrelated JSON in MySQL itself, including large
-        // numbers and empty objects that PHP's array cast cannot round-trip.
-        // A base query intentionally avoids Product saving observers which can
-        // normalize native measurement values even on additional-only saves.
-        $connection->update(
-            "UPDATE {$table} SET {$column} = JSON_SET(CASE WHEN {$column} IS NULL OR JSON_TYPE({$column}) = 'NULL' THEN JSON_OBJECT() ELSE {$column} END, "
-            .implode(', ', $paths)."), {$updatedAt} = ? WHERE {$key} = ?",
-            $bindings,
-        );
+            // One path per statement avoids assigning the same column twice on
+            // PostgreSQL. All paths and native history share the locked transaction.
+            // This bounded query has only value, timestamp, and primary-key bindings.
+            $connection->update($grammar->compileUpdate($query, $values), [
+                AdditionalData::encode($value),
+                $values[$product->getUpdatedAtColumn()],
+                ...$query->getBindings(),
+            ]);
+        }
     }
 
     private function recordHistory(Product $product, AdditionalData $before, array $changes): void
